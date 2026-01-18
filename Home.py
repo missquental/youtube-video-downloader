@@ -1,285 +1,296 @@
+# streamlit_app.py
 import streamlit as st
-import yt_dlp
 import os
-import tempfile
 import re
-from datetime import timedelta
+from io import BytesIO
+import tempfile
+import time
+
+# Install required packages
+os.system("pip install -q yt-dlp pytube moviepy")
 
 st.set_page_config(
-    page_title="VidSave - YouTube Downloader", 
-    page_icon="🎥", 
-    layout="wide"
+    page_title="YouTube Downloader",
+    page_icon="🎵",
+    layout="centered"
 )
 
-# Custom CSS styling
+# Custom CSS
 st.markdown("""
 <style>
-    .header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 15px;
+    .main-header {
         text-align: center;
+        color: #ff4b4b;
+        font-size: 2.5rem;
+        font-weight: bold;
         margin-bottom: 2rem;
+    }
+    .subheader {
+        text-align: center;
+        color: #1e88e5;
+        font-size: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    .stButton>button {
+        background-color: #ff4b4b;
         color: white;
-    }
-    .feature-card {
-        border: 2px solid #e0e0e0;
         border-radius: 10px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        transition: transform 0.2s;
+        height: 3rem;
+        font-weight: bold;
     }
-    .feature-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    .stSelectbox>div>div {
+        border-radius: 10px;
     }
-    .download-btn {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-        color: white !important;
-        border: none !important;
-        padding: 15px 30px !important;
-        font-size: 18px !important;
-        border-radius: 25px !important;
-        margin: 10px 0 !important;
-    }
-    .quality-badge {
-        background: #f0f0f0;
-        padding: 5px 10px;
-        border-radius: 15px;
-        margin: 2px;
-        display: inline-block;
-        font-size: 12px;
-    }
-    .stats-box {
-        background: #f8f9fa;
+    .success-box {
         padding: 1rem;
         border-radius: 10px;
-        text-align: center;
+        background-color: #e8f5e9;
+        border: 1px solid #4caf50;
+        margin: 1rem 0;
+    }
+    .error-box {
+        padding: 1rem;
+        border-radius: 10px;
+        background-color: #ffebee;
+        border: 1px solid #f44336;
         margin: 1rem 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
-def format_duration(seconds):
-    """Convert seconds to H:M:S format"""
-    return str(timedelta(seconds=int(seconds)))
+def clean_filename(filename):
+    """Clean filename from illegal characters"""
+    return re.sub(r'[<>:"/\\|?*\x00-\x1F]', '_', filename)[:100]
 
-def format_filesize(bytes_value):
-    """Convert bytes to human readable format"""
-    if bytes_value is None:
-        return "Unknown"
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if bytes_value < 1024.0:
-            return f"{bytes_value:.1f} {unit}"
-        bytes_value /= 1024.0
-    return f"{bytes_value:.1f} TB"
-
-def sanitize_filename(filename):
-    """Remove invalid characters from filename"""
-    return re.sub(r'[<>:"/\\|?*]', '', filename)[:100]
-
-def get_video_formats(url):
-    """Get available formats for the video"""
+def download_mp3_ytdlp(url):
+    """Download MP3 using yt-dlp"""
     try:
+        import yt_dlp
+        
+        # Create temporary directory
+        temp_dir = tempfile.mkdtemp()
+        
         ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return info
-    except Exception as e:
-        st.error(f"Gagal mengambil informasi video: {str(e)}")
-        return None
-
-def download_media(url, format_id=None, is_audio=False):
-    """Download video or audio"""
-    try:
-        temp_dir = tempfile.mkdtemp()
-        
-        if is_audio:
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                'quiet': True,
-            }
-        else:
-            if format_id:
-                ydl_opts = {
-                    'format': format_id,
-                    'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                    'quiet': True,
-                }
-            else:
-                ydl_opts = {
-                    'format': 'best[ext=mp4]',
-                    'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                    'quiet': True,
-                }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
+            title = clean_filename(info.get('title', 'unknown'))
+            mp3_file = os.path.join(temp_dir, f"{title}.mp3")
             
-            if is_audio:
-                filename = filename.rsplit('.', 1)[0] + '.mp3'
+            # Read file content
+            with open(mp3_file, 'rb') as f:
+                mp3_bytes = f.read()
             
-            return filename, info
+            return mp3_bytes, f"{title}.mp3"
             
     except Exception as e:
-        st.error(f"Download gagal: {str(e)}")
+        st.error(f"Error downloading MP3: {str(e)}")
         return None, None
 
-# Header
-st.markdown("""
-<div class="header">
-    <h1>🎥 VidSave - YouTube Downloader</h1>
-    <p style="font-size: 1.2rem; opacity: 0.9;">Unduh video dan musik dari YouTube dengan mudah dan cepat</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Main content
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.subheader("🔗 Masukkan URL YouTube")
-    url = st.text_input("", placeholder="https://www.youtube.com/watch?v=...", label_visibility="collapsed")
-    
-    if url:
-        with st.spinner("🔄 Mengambil informasi video..."):
-            video_info = get_video_formats(url)
+def download_mp4_ytdlp(url, quality='best'):
+    """Download MP4 using yt-dlp"""
+    try:
+        import yt_dlp
         
-        if video_info:
-            # Video information
-            st.markdown("---")
-            st.subheader("📹 Informasi Video")
+        # Create temporary directory
+        temp_dir = tempfile.mkdtemp()
+        
+        # Quality mapping
+        quality_formats = {
+            '360p': 'best[height<=360][ext=mp4]',
+            '480p': 'best[height<=480][ext=mp4]',
+            '720p': 'best[height<=720][ext=mp4]',
+            '1080p': 'best[height<=1080][ext=mp4]',
+            'best': 'best[ext=mp4]'
+        }
+        
+        ydl_opts = {
+            'format': quality_formats.get(quality, 'best[ext=mp4]'),
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = clean_filename(info.get('title', 'unknown'))
+            ext = info.get('ext', 'mp4')
+            mp4_file = os.path.join(temp_dir, f"{title}.{ext}")
             
-            col_info1, col_info2 = st.columns([1, 2])
-            with col_info1:
-                if 'thumbnail' in video_info:
-                    st.image(video_info['thumbnail'], width=200)
+            # Read file content
+            with open(mp4_file, 'rb') as f:
+                mp4_bytes = f.read()
             
-            with col_info2:
-                st.write(f"**judul:** {video_info.get('title', 'N/A')}")
-                st.write(f"**Channel:** {video_info.get('uploader', 'N/A')}")
-                st.write(f"**Durasi:** {format_duration(video_info.get('duration', 0))}")
-                st.write(f"**Dilihat:** {video_info.get('view_count', 0):,} kali")
-                st.write(f"**Tanggal Upload:** {video_info.get('upload_date', 'N/A')[:4]}")
+            return mp4_bytes, f"{title}.{ext}"
             
-            st.markdown("---")
+    except Exception as e:
+        st.error(f"Error downloading MP4: {str(e)}")
+        return None, None
+
+def get_video_info(url):
+    """Get video information"""
+    try:
+        import yt_dlp
+        ydl_opts = {'quiet': True, 'no_warnings': True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return {
+                'title': info.get('title', 'Unknown'),
+                'duration': info.get('duration', 0),
+                'thumbnail': info.get('thumbnail', ''),
+                'uploader': info.get('uploader', 'Unknown'),
+                'view_count': info.get('view_count', 0)
+            }
+    except:
+        return None
+
+def format_duration(seconds):
+    """Format duration"""
+    if seconds:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        else:
+            return f"{minutes:02d}:{secs:02d}"
+    return "Unknown"
+
+def main():
+    st.markdown('<h1 class="main-header">🎵 YouTube Downloader</h1>', unsafe_allow_html=True)
+    st.markdown('<h3 class="subheader">Download MP3 & MP4 Gratis Tanpa Iklan</h3>', unsafe_allow_html=True)
+    
+    # Tabs
+    tab1, tab2, tab3 = st.tabs(["🏠 Home", "⬇️ Download", "❓ Help"])
+    
+    with tab1:
+        st.subheader("Selamat Datang!")
+        st.write("""
+        Aplikasi ini memungkinkan Anda untuk:
+        - 🔊 Download audio YouTube sebagai MP3
+        - 📹 Download video YouTube sebagai MP4
+        - 🚫 Tanpa iklan dan gratis sepenuhnya
+        - ⚡ Proses cepat dan mudah
+        
+        **Cara menggunakan:**
+        1. Masuk ke tab "Download"
+        2. Paste URL YouTube
+        3. Pilih format (MP3/MP4) dan kualitas
+        4. Klik tombol download
+        5. File akan otomatis terdownload ke komputer Anda
+        """)
+        
+        st.info("💡 Tips: Gunakan URL YouTube yang valid dan pastikan video tersedia untuk publik.")
+    
+    with tab2:
+        st.subheader("Download YouTube Video/Audio")
+        
+        # URL input
+        url = st.text_input("🔗 Masukkan URL YouTube:", placeholder="https://www.youtube.com/watch?v=...")
+        
+        if url:
+            # Show video info
+            with st.spinner("Mengambil informasi video..."):
+                info = get_video_info(url)
+                
+            if info:
+                col1, col2 = st.columns([1, 2])
+                
+                with col1:
+                    if info['thumbnail']:
+                        st.image(info['thumbnail'], width=200)
+                
+                with col2:
+                    st.write(f"**📹 Judul:** {info['title']}")
+                    st.write(f"**⏱️ Durasi:** {format_duration(info['duration'])}")
+                    st.write(f"**👤 Channel:** {info['uploader']}")
+                    st.write(f"**👁️ Views:** {info['view_count']:,}" if info['view_count'] else "**👁️ Views:** Unknown")
             
-            # Available formats
-            st.subheader("📥 Pilihan Format Download")
+            # Format selection
+            st.divider()
+            format_choice = st.radio("🎯 Pilih Format Download:", ["🎵 MP3 (Audio)", "📹 MP4 (Video)"])
             
-            # Audio download section
-            with st.expander("🎵 Audio (MP3)", expanded=True):
-                if st.button("⬇️ Unduh Audio MP3", key="audio_btn"):
-                    with st.spinner("🎵 Sedang mengunduh audio..."):
-                        filename, info = download_media(url, is_audio=True)
-                        if filename and os.path.exists(filename):
-                            with open(filename, "rb") as file:
-                                st.success("✅ Audio berhasil diunduh!")
-                                st.download_button(
-                                    label="💾 Download MP3",
-                                    data=file,
-                                    file_name=os.path.basename(filename),
-                                    mime="audio/mpeg"
-                                )
+            if format_choice == "🎵 MP3 (Audio)":
+                if st.button("📥 Download MP3", type="primary", use_container_width=True):
+                    with st.spinner("🔄 Sedang memproses download MP3..."):
+                        mp3_bytes, filename = download_mp3_ytdlp(url)
+                        
+                        if mp3_bytes and filename:
+                            st.success("✅ Download berhasil!")
+                            st.balloons()
+                            
+                            # Download button
+                            st.download_button(
+                                label="💾 Simpan File MP3",
+                                data=mp3_bytes,
+                                file_name=filename,
+                                mime="audio/mpeg",
+                                use_container_width=True
+                            )
                         else:
-                            st.error("❌ Gagal mengunduh audio")
+                            st.error("❌ Download gagal! Pastikan URL valid dan coba lagi.")
             
-            # Video download section
-            with st.expander("📹 Video (MP4)", expanded=True):
-                # Filter video formats
-                video_formats = []
-                if 'formats' in video_info:
-                    for f in video_info['formats']:
-                        if f.get('vcodec') != 'none' and f.get('ext') == 'mp4':
-                            video_formats.append(f)
+            else:  # MP4
+                quality = st.selectbox("🎯 Pilih Kualitas Video:", 
+                                     [".best", "1080p", "720p", "480p", "360p"])
                 
-                # Sort by resolution
-                video_formats.sort(key=lambda x: x.get('height', 0), reverse=True)
-                
-                # Display available qualities
-                if video_formats:
-                    cols = st.columns(3)
-                    displayed_formats = []
-                    
-                    for i, fmt in enumerate(video_formats[:9]):  # Show max 9 formats
-                        if fmt.get('height') and fmt.get('height') not in displayed_formats:
-                            quality = f"{fmt.get('height')}p"
-                            filesize = format_filesize(fmt.get('filesize'))
+                if st.button("📥 Download MP4", type="primary", use_container_width=True):
+                    with st.spinner("🔄 Sedang memproses download MP4..."):
+                        mp4_bytes, filename = download_mp4_ytdlp(url, quality.replace(".best", "best"))
+                        
+                        if mp4_bytes and filename:
+                            st.success("✅ Download berhasil!")
+                            st.balloons()
                             
-                            with cols[i % 3]:
-                                if st.button(f"{quality}\n({filesize})", key=f"fmt_{fmt.get('format_id')}"):
-                                    with st.spinner(f"📹 Sedang mengunduh video {quality}..."):
-                                        filename, info = download_media(url, fmt.get('format_id'), False)
-                                        if filename and os.path.exists(filename):
-                                            with open(filename, "rb") as file:
-                                                st.success(f"✅ Video {quality} berhasil diunduh!")
-                                                st.download_button(
-                                                    label=f"💾 Download {quality}",
-                                                    data=file,
-                                                    file_name=os.path.basename(filename),
-                                                    mime="video/mp4"
-                                                )
-                                        else:
-                                            st.error("❌ Gagal mengunduh video")
-                            
-                            displayed_formats.append(fmt.get('height'))
-                else:
-                    st.info("Tidak ada format video tersedia")
-            
-            # Preview section
-            st.markdown("---")
-            st.subheader("👀 Preview")
-            if 'thumbnail' in video_info:
-                st.image(video_info['thumbnail'], caption="Thumbnail Video", use_column_width=True)
-
-with col2:
-    st.markdown('<div class="feature-card">', unsafe_allow_html=True)
-    st.subheader("✨ Fitur Unggulan")
-    st.markdown("""
-    • 🔥 **Gratis & Cepat** - Tanpa biaya tersembunyi
-    • 🎯 **Kualitas Tinggi** - Hingga 1080p Full HD
-    • 🎵 **Audio Premium** - MP3 kualitas tinggi
-    • ⚡ **Tanpa Registrasi** - Langsung bisa digunakan
-    • 🛡️ **Aman & Privasi** - File langsung ke device Anda
-    • 🌐 **Kompatibel** - Bekerja di semua device
-    """)
-    st.markdown('</div>', unsafe_allow_html=True)
+                            # Download button
+                            st.download_button(
+                                label="💾 Simpan File MP4",
+                                data=mp4_bytes,
+                                file_name=filename,
+                                mime="video/mp4",
+                                use_container_width=True
+                            )
+                        else:
+                            st.error("❌ Download gagal! Pastikan URL valid dan coba lagi.")
+        
+        else:
+            st.info("👆 Masukkan URL YouTube di atas untuk mulai download")
     
-    st.markdown('<div class="feature-card">', unsafe_allow_html=True)
-    st.subheader("📋 Cara Menggunakan")
-    st.markdown("""
-    1. **Salin URL** video YouTube
-    2. **Tempel** di kolom input
-    3. **Pilih** format yang diinginkan
-    4. **Klik** tombol download
-    5. **Simpan** file ke device Anda
-    """)
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Stats
-    st.markdown('<div class="stats-box">', unsafe_allow_html=True)
-    st.subheader("📊 Statistik")
-    st.metric("Video Diproses", "10,000+", "↑ 15% Hari Ini")
-    st.metric("User Aktif", "50,000+", "↑ 8% Minggu Ini")
-    st.markdown('</div>', unsafe_allow_html=True)
+    with tab3:
+        st.subheader("❓ Bantuan & FAQ")
+        
+        st.write("**Q: Apakah aplikasi ini gratis?**")
+        st.write("A: Ya, 100% gratis tanpa biaya tersembunyi.")
+        
+        st.write("**Q: Apakah aman digunakan?**")
+        st.write("A: Ya, semua proses dilakukan di server aman dan file dihapus setelah download.")
+        
+        st.write("**Q: Format apa yang didukung?**")
+        st.write("A: MP3 (audio) dan MP4 (video) dengan berbagai kualitas.")
+        
+        st.write("**Q: Batas ukuran file?**")
+        st.write("A: Tergantung platform Streamlit, umumnya hingga 200MB.")
+        
+        st.write("**Q: Video apa saja yang bisa didownload?**")
+        st.write("A: Video yang tersedia untuk publik dan tidak melanggar hak cipta.")
+        
+        st.divider()
+        st.write("📝 **Disclaimer:**")
+        st.warning("""
+        - Gunakan aplikasi ini sesuai hak cipta dan ketentuan YouTube
+        - Kami tidak bertanggung jawab atas penyalahgunaan
+        - Semua file dihapus setelah proses download selesai
+        """)
 
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; padding: 2rem 0;">
-    <p>© 2024 VidSave - YouTube Downloader | Dibuat dengan ❤️ untuk komunitas</p>
-    <p style="font-size: 0.9rem; color: #666;">
-        Disclaimer: Aplikasi ini hanya untuk tujuan pribadi dan non-komersial. 
-        Pastikan Anda memiliki hak untuk mengunduh konten tersebut.
-    </p>
-</div>
-""", unsafe_allow_html=True)
+if __name__ == "__main__":
+    main()
