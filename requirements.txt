@@ -3,3 +3,4 @@ yt-dlp
 pytube
 yt-dlp
 moviepy
+metaai-api
